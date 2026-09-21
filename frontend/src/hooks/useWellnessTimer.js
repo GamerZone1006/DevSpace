@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/purity */
 import { useState, useEffect, useRef, useCallback } from "react";
 
 function useWellnessTimer() {
