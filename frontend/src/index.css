@@ -3833,6 +3833,75 @@ body {
     object-fit: cover;
 }
 
+.insta-preview-item {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background: #111;
+}
+
+.insta-preview-item img,
+.insta-preview-item video {
+    display: block;
+}
+
+.insta-remove-media {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    z-index: 2;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.72);
+    color: #fff;
+    cursor: pointer;
+    font-size: 17px;
+    line-height: 20px;
+}
+
+.insta-remove-media:hover,
+.insta-remove-media:focus-visible {
+    background: rgba(237, 73, 86, 0.9);
+    outline: none;
+}
+
+.insta-add-media {
+    display: flex;
+    min-width: 0;
+    min-height: 70px;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 2px;
+    border: 1px dashed #737373;
+    background: #1a1a1a;
+    color: #f5f5f5;
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s, background 0.2s;
+}
+
+.insta-add-media:hover,
+.insta-add-media:focus-visible {
+    border-color: #0095f6;
+    background: #222;
+    color: #0095f6;
+    outline: none;
+}
+
+.insta-add-media span {
+    font-size: 26px;
+    font-weight: 300;
+    line-height: 1;
+}
+
+.insta-add-media small {
+    font-size: 10px;
+}
+
 .insta-preview-count {
     position: absolute;
     top: 10px;

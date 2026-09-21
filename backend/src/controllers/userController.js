@@ -115,7 +115,7 @@ const getConnections = async (req, res) => {
             .sort({ username: 1 });
 
         const unseenFollowerIds = connectionType === "followers"
-            ? new Set((await FollowNotification.find({ recipient: currentUserId, seenAt: null }).select("follower"))
+            ? new Set((await FollowNotification.find({ recipient: req.userId, seenAt: null }).select("follower"))
                 .map((notification) => notification.follower.toString()))
             : new Set();
 

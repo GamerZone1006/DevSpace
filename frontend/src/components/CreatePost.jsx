@@ -56,7 +56,12 @@ function CreatePost({ onPostCreated }) {
     const fileInputRef = useRef(null);
 
     const openCreationGuidelines = () => {
-        if (!guidelinesAcknowledged) setGuidelinesOpen(true);
+        if (!guidelinesAcknowledged) {
+            setGuidelinesOpen(true);
+            return;
+        }
+
+        fileInputRef.current?.click();
     };
 
     const continueToEditor = () => {
@@ -67,24 +72,52 @@ function CreatePost({ onPostCreated }) {
         });
     };
 
+    const openFilePicker = (event) => {
+        event?.stopPropagation();
+        fileInputRef.current?.click();
+    };
+
     const handleFileChange = (e) => {
         const selectedFiles = Array.from(e.target.files || []);
         if (!selectedFiles.length) return;
-        if (selectedFiles.length > MAX_FILES) {
-            setError(`You can select a maximum of ${MAX_FILES} images.`);
-            e.target.value = "";
-            return;
-        }
 
         const hasVideo = selectedFiles.some((selectedFile) => selectedFile.type.startsWith("video/"));
-        if (hasVideo && selectedFiles.length > 1) {
+        if (hasVideo && (selectedFiles.length > 1 || files.length > 0)) {
             setError("Videos must be uploaded individually.");
             e.target.value = "";
             return;
         }
 
-        setFiles(selectedFiles);
-        setPreviewUrls(selectedFiles.map((selectedFile) => URL.createObjectURL(selectedFile)));
+        const remainingSlots = MAX_FILES - files.length;
+        if (remainingSlots <= 0) {
+            setError(`You can select a maximum of ${MAX_FILES} items.`);
+            e.target.value = "";
+            return;
+        }
+
+        const filesToAdd = selectedFiles.slice(0, remainingSlots);
+        if (filesToAdd.length < selectedFiles.length) {
+            setError(`Only ${remainingSlots} more item${remainingSlots === 1 ? "" : "s"} can be added.`);
+        } else {
+            setError("");
+        }
+
+        setFiles((currentFiles) => [...currentFiles, ...filesToAdd]);
+        setPreviewUrls((currentPreviews) => [
+            ...currentPreviews,
+            ...filesToAdd.map((selectedFile) => URL.createObjectURL(selectedFile))
+        ]);
+        e.target.value = "";
+    };
+
+    const removeMedia = (index, event) => {
+        event.stopPropagation();
+        setPreviewUrls((currentPreviews) => {
+            const previewUrl = currentPreviews[index];
+            if (previewUrl) URL.revokeObjectURL(previewUrl);
+            return currentPreviews.filter((_, previewIndex) => previewIndex !== index);
+        });
+        setFiles((currentFiles) => currentFiles.filter((_, fileIndex) => fileIndex !== index));
         setError("");
     };
 
@@ -114,6 +147,7 @@ function CreatePost({ onPostCreated }) {
 
             // Reset state
             setFiles([]);
+            previewUrls.forEach((previewUrl) => URL.revokeObjectURL(previewUrl));
             setPreviewUrls([]);
             setCaption("");
             setTechnologyTags("");
@@ -190,12 +224,33 @@ function CreatePost({ onPostCreated }) {
                             <div className="insta-preview-container">
                                 <div className="insta-preview-grid">
                                     {previewUrls.map((previewUrl, index) => (
-                                        files[index]?.type.startsWith("video/") ? (
-                                            <VideoPreview key={previewUrl} src={previewUrl} />
-                                        ) : (
-                                            <img key={previewUrl} src={previewUrl} alt={`Upload preview ${index + 1}`} />
-                                        )
+                                        <div className="insta-preview-item" key={previewUrl}>
+                                            {files[index]?.type.startsWith("video/") ? (
+                                                <VideoPreview src={previewUrl} />
+                                            ) : (
+                                                <img src={previewUrl} alt={`Upload preview ${index + 1}`} />
+                                            )}
+                                            <button
+                                                type="button"
+                                                className="insta-remove-media"
+                                                onClick={(event) => removeMedia(index, event)}
+                                                aria-label={`Remove media ${index + 1}`}
+                                            >
+                                                ×
+                                            </button>
+                                        </div>
                                     ))}
+                                    {files.length < MAX_FILES && (
+                                        <button
+                                            type="button"
+                                            className="insta-add-media"
+                                            onClick={openFilePicker}
+                                            aria-label="Add more media"
+                                        >
+                                            <span>+</span>
+                                            <small>Add</small>
+                                        </button>
+                                    )}
                                 </div>
                                 <span className="insta-preview-count">
                                     {files.length} {files.length === 1 ? (files[0]?.type.startsWith("video/") ? "video" : "image") : "items"} selected
@@ -204,8 +259,7 @@ function CreatePost({ onPostCreated }) {
                                     type="button" 
                                     className="insta-change-media"
                                     onClick={(e) => {
-                                        e.stopPropagation();
-                                        fileInputRef.current.click();
+                                        openFilePicker(e);
                                     }}
                                 >
                                     Change
