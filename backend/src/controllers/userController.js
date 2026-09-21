@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const User = require("../models/User");
 const Post = require("../models/Post");
 const SavedPost = require("../models/SavedPost");
+const FollowNotification = require("../models/FollowNotification");
 const { visiblePostsFilter } = require("../utils/postVisibility");
 const { formatPost } = require("../utils/formatPost");
 
@@ -49,6 +50,12 @@ const buildProfilePayload = async (user, currentUserId) => {
         skills,
         interests: user.interests,
         badges: user.badges || [],
+        moderationWarnings: user.moderationWarnings?.filter((warning) => !warning.seenAt).map((warning) => ({
+            _id: warning._id,
+            post: warning.post,
+            message: "Your post was marked as inappropriate by the community and has been automatically removed.",
+            createdAt: warning.createdAt
+        })) || [],
         stats: {
             postsCount: user.stats?.postsCount ?? posts.length,
             followersCount: user.stats?.followersCount ?? user.followers.length,
@@ -67,7 +74,7 @@ const buildProfilePayload = async (user, currentUserId) => {
 const getOwnProfile = async (req, res) => {
     try {
         const user = await User.findById(req.userId).select(
-            "name username profilePicture bio linkedinUrl githubUrl skills interests stats followers following badges"
+            "name username profilePicture bio linkedinUrl githubUrl skills interests stats followers following badges moderationWarnings"
         );
 
         if (!user) return res.status(404).json({ message: "User not found" });
@@ -87,7 +94,7 @@ const getProfile = async (req, res) => {
         if (!user) return res.status(404).json({ message: "User not found" });
 
         const selected = await User.findById(user._id).select(
-            "name username profilePicture bio linkedinUrl githubUrl skills interests stats followers following badges"
+            "name username profilePicture bio linkedinUrl githubUrl skills interests stats followers following badges moderationWarnings"
         );
 
         res.status(200).json(await buildProfilePayload(selected, req.userId));
@@ -107,6 +114,11 @@ const getConnections = async (req, res) => {
             .select("name username profilePicture followers")
             .sort({ username: 1 });
 
+        const unseenFollowerIds = connectionType === "followers"
+            ? new Set((await FollowNotification.find({ recipient: currentUserId, seenAt: null }).select("follower"))
+                .map((notification) => notification.follower.toString()))
+            : new Set();
+
         res.status(200).json({
             users: users.map((connection) => ({
                 _id: connection._id,
@@ -115,7 +127,8 @@ const getConnections = async (req, res) => {
                 profilePicture: connection.profilePicture,
                 followingByMe: connection.followers.some(
                     (id) => id.toString() === req.userId.toString()
-                )
+                ),
+                isUnseen: unseenFollowerIds.has(connection._id.toString())
             }))
         });
     } catch (error) {
@@ -150,4 +163,51 @@ const updateProfile = async (req, res) => {
     }
 };
 
-module.exports = { getProfile, getOwnProfile, updateProfile, getConnections };
+const markModerationWarningSeen = async (req, res) => {
+    try {
+        const result = await User.updateOne(
+            { _id: req.userId, "moderationWarnings._id": req.params.warningId },
+            { $set: { "moderationWarnings.$.seenAt": new Date() } }
+        );
+
+        if (!result.matchedCount) return res.status(404).json({ message: "Warning not found" });
+
+        // Check if there are any remaining unseen warnings
+        const user = await User.findById(req.userId).select("moderationWarnings");
+        const hasUnseen = user.moderationWarnings?.some((warning) => !warning.seenAt);
+        if (!hasUnseen) {
+            await User.findByIdAndUpdate(req.userId, { $set: { hasUnseenReportWarning: false } });
+        }
+
+        res.status(200).json({ message: "Warning dismissed" });
+    } catch (error) {
+        console.error("Mark moderation warning seen error:", error);
+        res.status(500).json({ message: "Failed to dismiss warning" });
+    }
+};
+
+const getModerationWarnings = async (req, res) => {
+    try {
+        const user = await User.findById(req.userId).select("moderationWarnings");
+        if (!user) return res.status(404).json({ message: "User not found" });
+        res.status(200).json({ warnings: user.moderationWarnings?.filter((warning) => !warning.seenAt) || [] });
+    } catch (error) {
+        console.error("Get moderation warnings error:", error);
+        res.status(500).json({ message: "Failed to load warnings" });
+    }
+};
+
+const markAllModerationWarningsSeen = async (req, res) => {
+    try {
+        await User.updateOne(
+            { _id: req.userId },
+            { $set: { "moderationWarnings.$[].seenAt": new Date(), hasUnseenReportWarning: false } }
+        );
+        res.status(200).json({ message: "All warnings marked as seen" });
+    } catch (error) {
+        console.error("Mark all moderation warnings seen error:", error);
+        res.status(500).json({ message: "Failed to mark warnings as seen" });
+    }
+};
+
+module.exports = { getProfile, getOwnProfile, updateProfile, getConnections, markModerationWarningSeen, getModerationWarnings, markAllModerationWarningsSeen };

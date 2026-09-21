@@ -6,6 +6,7 @@ import api from "../services/api";
 import PostCard from "../components/PostCard";
 import useWellnessTimer from "../hooks/useWellnessTimer";
 import WellnessReminder from "../components/WellnessReminder";
+import { useFollowerNotifications } from "../context/FollowerNotificationContext";
 
 function Feed() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -31,8 +32,17 @@ function Feed() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [refreshing, setRefreshing] = useState(false);
+    
+    // Instagram-like lazy loading: starts with 10 posts and loads 10 more on scroll
+    const [visibleCount, setVisibleCount] = useState(10);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const { subscribeToPostDeletions } = useFollowerNotifications();
 
-    const fetchFeed = useCallback(async (tab = activeTab, silent = false, query = searchQuery) => {
+    useEffect(() => subscribeToPostDeletions(({ postId }) => {
+        setPosts((current) => current.filter((post) => String(post._id) !== String(postId)));
+    }), [subscribeToPostDeletions]);
+
+    const fetchFeed = useCallback(async (tab = activeTab, silent = false, query = searchQuery, initialLoad = false) => {
         try {
             if (!silent) {
                 setLoading(true);
@@ -47,7 +57,9 @@ function Feed() {
                     ? "/feed/following"
                     : "/feed/for-you";
 
-            const response = await api.get(endpoint);
+            const response = await api.get(endpoint, {
+                params: initialLoad && tab === "for-you" ? { initial: "true" } : undefined
+            });
             let feed = response.data.feed || [];
 
             // Filter by search query if present
@@ -67,6 +79,8 @@ function Feed() {
                     ? feed.filter((post) => post.type === "video")
                     : feed
             );
+            // Reset visible count back to 10 on fresh fetch/tab change
+            setVisibleCount(10);
         } catch (feedError) {
             console.error("Feed error:", feedError);
 
@@ -84,15 +98,33 @@ function Feed() {
 
     useEffect(() => {
         queueMicrotask(() => {
-            fetchFeed(activeTab);
+            fetchFeed(activeTab, false, searchQuery, true);
         });
-    }, [activeTab, fetchFeed]);
+    }, [activeTab, fetchFeed, searchQuery]);
 
     useEffect(() => {
         if (searchQuery) {
             fetchFeed(activeTab, true);
         }
     }, [searchQuery, activeTab, fetchFeed]);
+
+    // Instagram-like automatic infinite scroll listener (loads 10 more posts instantly)
+    useEffect(() => {
+        const handleScroll = () => {
+            if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 500) {
+                if (!loadingMore && visibleCount < posts.length) {
+                    setLoadingMore(true);
+                    setTimeout(() => {
+                        setVisibleCount((prev) => Math.min(prev + 10, posts.length));
+                        setLoadingMore(false);
+                    }, 200); // Super fast buffer (~0.2 seconds)
+                }
+            }
+        };
+
+        window.addEventListener("scroll", handleScroll);
+        return () => window.removeEventListener("scroll", handleScroll);
+    }, [loadingMore, visibleCount, posts.length]);
 
     const changeTab = (tab) => {
         setActiveTab(tab);
@@ -113,7 +145,8 @@ function Feed() {
         setPosts((current) => current.filter((post) => post._id !== postId));
     };
 
-    const visiblePosts = posts;
+    // Slice posts up to visibleCount (10 initial, +10 per scroll batch)
+    const visiblePosts = posts.slice(0, visibleCount);
 
     return (
         <div className="feed-page">
@@ -169,7 +202,7 @@ function Feed() {
                 <div className="feed-message error">{error}</div>
             )}
 
-            {!loading && !error && visiblePosts.length === 0 && (
+            {!loading && !error && posts.length === 0 && (
                 <div className="feed-message">
                     {activeTab === "reels"
                         ? "No reels yet. Post a video to get started."
@@ -189,6 +222,13 @@ function Feed() {
                             onPostDelete={handlePostDelete}
                         />
                     ))}
+
+                    {/* Seamless Instagram-like loading indicator at bottom */}
+                    {loadingMore && (
+                        <div className="feed-message" style={{ padding: "16px 0", fontSize: "0.85rem", opacity: 0.8 }}>
+                            Loading more posts...
+                        </div>
+                    )}
                 </div>
             )}
 

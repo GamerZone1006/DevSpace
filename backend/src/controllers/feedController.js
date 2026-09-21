@@ -37,7 +37,9 @@ const getFollowingFeed = async (req, res) => {
 
 const getForYouFeed = async (req, res) => {
     try {
-        const recommendations = await generateRecommendations(req.userId, 50);
+        const recommendations = await generateRecommendations(req.userId, 50, {
+            prioritizeNewest: req.query.initial === "true"
+        });
         const posts = recommendations.map((item) => item.post);
         const savedPosts = await SavedPost.find({
             user: req.userId,

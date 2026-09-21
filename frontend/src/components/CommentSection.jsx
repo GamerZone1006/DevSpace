@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import api from "../services/api";
 
-function CommentSection({ postId, open, onClose }) {
+function CommentSection({ postId, open, onClose, onCommentAdded }) {
     const [comments, setComments] = useState([]);
     const [text, setText] = useState("");
     const [loading, setLoading] = useState(false);
@@ -17,8 +18,10 @@ function CommentSection({ postId, open, onClose }) {
             }
         };
 
-        fetchComments();
-    }, [postId]);
+        if (open) {
+            fetchComments();
+        }
+    }, [postId, open]);
 
     const handleComment = async (e) => {
         e.preventDefault();
@@ -39,6 +42,11 @@ function CommentSection({ postId, open, onClose }) {
             ]);
 
             setText("");
+
+            // Instantly update the comment count in the parent post component
+            if (onCommentAdded) {
+                onCommentAdded();
+            }
         } catch (error) {
             console.error("Add comment error:", error);
         } finally {
@@ -62,18 +70,38 @@ function CommentSection({ postId, open, onClose }) {
                 {comments.length === 0 ? (
                     <p className="no-comments">No comments yet.</p>
                 ) : (
-                    comments.map((comment) => (
-                        <div
-                            className="comment"
-                            key={comment._id}
-                        >
-                            <strong>@{comment.user?.username || "developer"}</strong>
+                    comments.map((comment) => {
+                        const userId = comment.user?._id || comment.user;
+                        const username = comment.user?.username || "developer";
+                        
+                        const commentDate = comment.createdAt 
+                            ? new Date(comment.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) 
+                            : "";
 
-                            <span>
-                                {comment.text}
-                            </span>
-                        </div>
-                    ))
+                        return (
+                            <div
+                                className="comment"
+                                key={comment._id}
+                            >
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                    <Link 
+                                        to={`/profile/${userId}`} 
+                                        style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 600 }}
+                                    >
+                                        @{username}
+                                    </Link>
+                                    {commentDate && (
+                                        <span style={{ fontSize: "11px", color: "var(--text-dim)", opacity: 0.8 }}>
+                                            {commentDate}
+                                        </span>
+                                    )}
+                                </div>
+                                <span>
+                                    {comment.text}
+                                </span>
+                            </div>
+                        );
+                    })
                 )}
             </div>
 
@@ -96,7 +124,6 @@ function CommentSection({ postId, open, onClose }) {
                     {loading ? "..." : "Post"}
                 </button>
             </form>
-
         </aside>
     );
 }

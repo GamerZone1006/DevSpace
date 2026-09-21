@@ -3,7 +3,18 @@ const mongoose = require("mongoose");
 const Message = require("./models/Message");
 const User = require("./models/User");
 
+let socketServer;
+
+const emitPostDeleted = (postId) => {
+    socketServer?.emit("post:deleted", { postId: postId.toString() });
+};
+
+const emitToUser = (userId, event, payload) => {
+    socketServer?.to(`user:${userId}`).emit(event, payload);
+};
+
 const configureSocket = (io) => {
+    socketServer = io;
     io.use((socket, next) => {
         try {
             const token = socket.handshake.auth?.token;
@@ -19,7 +30,7 @@ const configureSocket = (io) => {
         socket.join(`user:${socket.userId}`);
         socket.emit("connection:ready", { userId: socket.userId });
 
-        socket.on("message:send", async ({ recipientId, text }, acknowledge) => {
+        socket.on("message:send", async ({ recipientId, text, sharedPost = null }, acknowledge) => {
             try {
                 if (!mongoose.Types.ObjectId.isValid(recipientId) || !text?.trim()) {
                     return acknowledge?.({ ok: false, message: "Recipient and message are required" });
@@ -31,7 +42,8 @@ const configureSocket = (io) => {
                 const message = await Message.create({
                     sender: socket.userId,
                     recipient: recipientId,
-                    text: text.trim()
+                    text: text.trim(),
+                    sharedPost
                 });
 
                 const populatedMessage = await message.populate("sender", "name username profilePicture");
@@ -61,3 +73,5 @@ const configureSocket = (io) => {
 };
 
 module.exports = configureSocket;
+module.exports.emitToUser = emitToUser;
+module.exports.emitPostDeleted = emitPostDeleted;

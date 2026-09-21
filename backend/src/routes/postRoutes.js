@@ -13,7 +13,9 @@ const {
     getPost,
     getAllPosts,
     deletePost,
-    toggleLike
+    toggleLike,
+    trackView,
+    reportPost
 } = require("../controllers/postController");
 
 const router = express.Router();
@@ -91,6 +93,18 @@ router.post(
     "/:id/like",
     protect,
     toggleLike
+);
+
+router.post(
+    "/:id/view",
+    protect,
+    trackView
+);
+
+router.post(
+    "/:id/report",
+    protect,
+    reportPost
 );
 
 

@@ -4,6 +4,7 @@ const WatchHistory = require("../models/WatchHistory");
 const {
     updateInterestScores
 } = require("../services/interestLearningService");
+const { formatPost } = require("../utils/formatPost");
 
 const toggleSave = async (req, res) => {
     try {
@@ -115,7 +116,31 @@ const sharePost = async (req, res) => {
     }
 };
 
+const getSavedPosts = async (req, res) => {
+    try {
+        const savedPosts = await SavedPost.find({ user: req.userId })
+            .sort({ createdAt: -1 })
+            .populate({
+                path: "post",
+                populate: {
+                    path: "author",
+                    select: "name username profilePicture bio"
+                }
+            });
+
+        const posts = savedPosts
+            .filter((savedPost) => savedPost.post)
+            .map((savedPost) => formatPost(savedPost.post, req.userId, new Set([savedPost.post._id.toString()])));
+
+        res.status(200).json({ posts });
+    } catch (error) {
+        console.error("Saved posts error:", error);
+        res.status(500).json({ message: "Failed to load saved posts" });
+    }
+};
+
 module.exports = {
     toggleSave,
-    sharePost
+    sharePost,
+    getSavedPosts
 };

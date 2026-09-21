@@ -9,10 +9,14 @@ import ProfileEdit from "../components/ProfileEdit";
 import BadgesSection from "../components/BadgesSection";
 import ConnectionsDrawer from "../components/ConnectionsDrawer";
 import { useUser } from "../context/useUser";
+import { useFollowerNotifications } from "../context/FollowerNotificationContext";
+import { useModerationNotifications } from "../context/ModerationNotificationContext";
 
 function Profile() {
     const { userId } = useParams();
     const { setUser } = useUser();
+    const { hasUnseenFollowers, markFollowersSeen, subscribeToFollowerEvents, subscribeToPostDeletions } = useFollowerNotifications();
+    const { hasUnseenWarnings, markWarningsSeen } = useModerationNotifications();
 
     const [profile, setProfile] = useState(null);
     const [posts, setPosts] = useState([]);
@@ -34,6 +38,11 @@ function Profile() {
 
                 setProfile(response.data.user);
                 setPosts(response.data.posts || []);
+
+                // Mark moderation warnings as seen when viewing own profile
+                if (!userId && hasUnseenWarnings) {
+                    markWarningsSeen();
+                }
             } catch (loadError) {
                 console.error("Profile error:", loadError);
 
@@ -47,7 +56,29 @@ function Profile() {
         };
 
         loadProfile();
-    }, [userId]);
+    }, [userId, hasUnseenWarnings, markWarningsSeen]);
+
+    useEffect(() => subscribeToFollowerEvents((event) => {
+        if (!profile?.isOwnProfile) return;
+
+        setProfile((current) => {
+            if (!current) return current;
+            const followersCount = current.stats?.followersCount || 0;
+            const nextCount = event.action === "created"
+                ? followersCount + 1
+                : Math.max(0, followersCount - 1);
+
+            return {
+                ...current,
+                stats: { ...current.stats, followersCount: nextCount }
+            };
+        });
+    }), [profile?.isOwnProfile, subscribeToFollowerEvents]);
+
+    useEffect(() => subscribeToPostDeletions(({ postId }) => {
+        setPosts((current) => current.filter((post) => String(post._id) !== String(postId)));
+        setActivePost((current) => current && String(current._id) === String(postId) ? null : current);
+    }), [subscribeToPostDeletions]);
 
     useEffect(() => {
         if (!activePost) return undefined;
@@ -89,6 +120,13 @@ function Profile() {
         }));
     };
 
+    const openConnections = (type) => {
+        if (type === "followers" && profile?.isOwnProfile) {
+            markFollowersSeen();
+        }
+        setConnectionsType(type);
+    };
+
     const handlePostCreated = (createdPost) => {
         if (createdPost) {
             setPosts((current) => [createdPost, ...current]);
@@ -102,6 +140,17 @@ function Profile() {
         }
     };
 
+    const removePostFromState = (postId) => {
+        setPosts((current) => current.filter((post) => post._id !== postId));
+        setProfile((current) => ({
+            ...current,
+            stats: {
+                ...current.stats,
+                postsCount: Math.max(0, (current.stats?.postsCount || 0) - 1)
+            }
+        }));
+    };
+
     const handlePostDelete = async (postId) => {
         if (!window.confirm("Are you sure you want to delete this post?")) {
             return;
@@ -109,17 +158,34 @@ function Profile() {
 
         try {
             await api.delete(`/posts/${postId}`);
-            setPosts((current) => current.filter((post) => post._id !== postId));
-            setProfile((current) => ({
-                ...current,
-                stats: {
-                    ...current.stats,
-                    postsCount: Math.max(0, (current.stats?.postsCount || 0) - 1)
-                }
-            }));
+            removePostFromState(postId);
         } catch (error) {
             console.error("Delete post error:", error);
             alert("Failed to delete post. Please try again.");
+        }
+    };
+
+    const dismissModerationWarning = async (warningId) => {
+        try {
+            await api.post(`/users/me/moderation-warnings/${warningId}/seen`);
+            setProfile((current) => ({
+                ...current,
+                moderationWarnings: current.moderationWarnings.filter((warning) => warning._id !== warningId)
+            }));
+        } catch (dismissError) {
+            console.error("Dismiss moderation warning error:", dismissError);
+        }
+    };
+
+    const dismissAllWarnings = async () => {
+        try {
+            await markWarningsSeen();
+            setProfile((current) => ({
+                ...current,
+                moderationWarnings: []
+            }));
+        } catch (dismissError) {
+            console.error("Dismiss all warnings error:", dismissError);
         }
     };
 
@@ -144,7 +210,8 @@ function Profile() {
             )}
 
             <div className="profile-header">
-                <div className="profile-avatar">
+                <div className="profile-avatar-wrap">
+                    <div className="profile-avatar">
                     {profile.profilePicture ? (
                         <img
                             src={profile.profilePicture}
@@ -152,6 +219,10 @@ function Profile() {
                         />
                     ) : (
                         profile.name?.charAt(0).toUpperCase()
+                    )}
+                    </div>
+                    {profile.isOwnProfile && profile.moderationWarnings?.length > 0 && (
+                        <span className="follower-notification-badge" aria-label="Moderation warning" />
                     )}
                 </div>
 
@@ -204,17 +275,27 @@ function Profile() {
                             <strong>{profile.stats?.postsCount || posts.length}</strong>{" "}
                             posts
                         </span>
-                        <button type="button" onClick={() => setConnectionsType("followers")}>
+                        <button type="button" onClick={() => openConnections("followers")}>
                             <strong>{profile.stats?.followersCount || 0}</strong>{" "}
                             followers
+                            {profile.isOwnProfile && hasUnseenFollowers && (
+                                <span className="followers-notification-badge" aria-label="New followers" />
+                            )}
                         </button>
-                        <button type="button" onClick={() => setConnectionsType("following")}>
+                        <button type="button" onClick={() => openConnections("following")}>
                             <strong>{profile.stats?.followingCount || 0}</strong>{" "}
                             following
                         </button>
                     </div>
                 </div>
             </div>
+
+            {profile.isOwnProfile && profile.moderationWarnings?.length > 0 && (
+                <div className="moderation-warning-card" role="alert">
+                    <p>Your post was marked as inappropriate by the community and has been automatically removed.</p>
+                    <button type="button" onClick={dismissAllWarnings} aria-label="Dismiss warning">Dismiss</button>
+                </div>
+            )}
 
             {isEditing && (
                 <ProfileEdit
@@ -297,7 +378,7 @@ function Profile() {
                             post={activePost}
                             onPostUpdate={handlePostUpdate}
                             onPostDelete={(postId) => {
-                                handlePostDelete(postId);
+                                removePostFromState(postId);
                                 setActivePost(null);
                             }}
                             initialCommentsOpen

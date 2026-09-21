@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+/* eslint-disable react-hooks/set-state-in-effect */
+import { useEffect, useRef, useState, Fragment } from "react";
 import { io } from "socket.io-client";
 import api from "../services/api";
 import { useUser } from "../context/useUser";
@@ -23,6 +24,11 @@ function MessagingHub({ open, onClose, onUnreadChange }) {
     const [text, setText] = useState("");
     const [loading, setLoading] = useState(false);
     const [socketConnected, setSocketConnected] = useState(false);
+    const [expandedSharedPost, setExpandedSharedPost] = useState(null);
+    
+    // Tracks unread counts per user ID: { [userId]: count }
+    const [unreadCounts, setUnreadCounts] = useState({});
+
     const socketRef = useRef(null);
     const activeUserRef = useRef(null);
     const messagesEndRef = useRef(null);
@@ -55,8 +61,17 @@ function MessagingHub({ open, onClose, onUnreadChange }) {
                     : [...current, message]);
             }
 
-            if (isIncoming && !belongsToActiveConversation) {
+            if (isIncoming) {
+                // Always increment the global unread count for the main message icon badge
                 onUnreadChange?.((count) => count + 1);
+
+                // If not currently looking at this conversation, increment the sender's specific badge
+                if (!belongsToActiveConversation) {
+                    setUnreadCounts((prev) => ({
+                        ...prev,
+                        [senderId]: (prev[senderId] || 0) + 1
+                    }));
+                }
             }
         });
         socket.on("message:delivered", ({ messageId }) => {
@@ -91,6 +106,13 @@ function MessagingHub({ open, onClose, onUnreadChange }) {
 
     useEffect(() => {
         if (!activeUserId) return;
+        
+        // Clear unread badge for this active user when opening their chat
+        setUnreadCounts((prev) => ({
+            ...prev,
+            [activeUserId]: 0
+        }));
+
         const loadConversation = async () => {
             try {
                 setLoading(true);
@@ -133,6 +155,26 @@ function MessagingHub({ open, onClose, onUnreadChange }) {
         return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     };
 
+    const formatMessageDate = (timestamp) => {
+        if (!timestamp) return "";
+        const date = new Date(timestamp);
+        if (isNaN(date.getTime())) return "";
+
+        const today = new Date();
+        const yesterday = new Date(today);
+        yesterday.setDate(today.getDate() - 1);
+        const isSameDay = (first, second) =>
+            first.getFullYear() === second.getFullYear() &&
+            first.getMonth() === second.getMonth() &&
+            first.getDate() === second.getDate();
+        const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+        if (isSameDay(date, today)) return `Today ${time}`;
+        if (isSameDay(date, yesterday)) return `Yesterday ${time}`;
+
+        return `${date.toLocaleDateString([], { weekday: "short", day: "numeric" })} ${time}`;
+    };
+
     return (
         <section className={`messaging-hub ${open ? "is-open" : ""} ${open && activeUser ? "has-chat" : ""}`} aria-label="Messages">
             <div className="following-strip">
@@ -143,17 +185,44 @@ function MessagingHub({ open, onClose, onUnreadChange }) {
                 <div className="following-users">
                     {following.length === 0 ? (
                         <span className="following-empty">Follow developers to start a conversation.</span>
-                    ) : following.map((user) => (
-                        <button
-                            type="button"
-                            className={`following-user ${activeUser?._id === user._id ? "selected" : ""}`}
-                            key={user._id}
-                            onClick={() => setActiveUser(user)}
-                        >
-                            <UserAvatar user={user} className="following-avatar" />
-                            <span>{user.name || user.username}</span>
-                        </button>
-                    ))}
+                    ) : following.map((user) => {
+                        const unreadCount = unreadCounts[user._id] || 0;
+                        return (
+                            <button
+                                type="button"
+                                className={`following-user ${activeUser?._id === user._id ? "selected" : ""}`}
+                                key={user._id}
+                                onClick={() => setActiveUser(user)}
+                                style={{ position: "relative" }}
+                            >
+                                <div style={{ position: "relative", display: "inline-block" }}>
+                                    <UserAvatar user={user} className="following-avatar" />
+                                    {unreadCount > 0 && (
+                                        <span 
+                                            className="unread-badge"
+                                            style={{
+                                                position: "absolute",
+                                                top: "-2px",
+                                                right: "-2px",
+                                                background: "#ff007f",
+                                                color: "#fff",
+                                                borderRadius: "50%",
+                                                padding: "2px 6px",
+                                                fontSize: "0.65rem",
+                                                fontWeight: "bold",
+                                                minWidth: "16px",
+                                                textAlign: "center",
+                                                boxShadow: "0 2px 4px rgba(0,0,0,0.3)"
+                                            }}
+                                        >
+                                            {unreadCount > 9 ? "9+" : unreadCount}
+                                        </span>
+                                    )}
+                                </div>
+                                <span>{user.name || user.username}</span>
+                            </button>
+                        );
+                    })}
                 </div>
             </div>
 
@@ -174,19 +243,59 @@ function MessagingHub({ open, onClose, onUnreadChange }) {
                         <div className="chat-placeholder">Loading thread...</div>
                     ) : messages.length === 0 ? (
                         <div className="chat-placeholder">No messages yet. Start the conversation.</div>
-                    ) : messages.map((message) => {
+                    ) : messages.map((message, index) => {
+                        const previousMessage = messages[index - 1];
+                        const messageTimestamp = message.createdAt || message.timestamp;
+                        const previousTimestamp = previousMessage?.createdAt || previousMessage?.timestamp;
+                        const messageDate = new Date(messageTimestamp);
+                        const previousDate = new Date(previousTimestamp);
+                        const isDifferentDay = index === 0 ||
+                            messageDate.toDateString() !== previousDate.toDateString();
+                        const hasSignificantGap = index > 0 &&
+                            messageDate.getTime() - previousDate.getTime() >= 30 * 60 * 1000;
+                        const showDateSeparator = isDifferentDay || hasSignificantGap;
                         const mine = (message.sender?._id || message.sender) === currentUser?._id;
                         const messageTime = formatMessageTime(message.createdAt || message.timestamp);
                         return (
-                            <div className={`chat-message ${mine ? "mine" : "theirs"}`} key={message._id}>
-                                <div className="message-bubble-content">
-                                    <span>{message.text}</span>
+                            <Fragment key={message._id || index}>
+                                {showDateSeparator && (
+                                    <div
+                                        className="message-date-separator"
+                                        style={{ textAlign: "center", fontSize: "0.7rem", opacity: 0.6, margin: "0.75rem 0", width: "100%" }}
+                                    >
+                                        {formatMessageDate(messageTimestamp)}
+                                    </div>
+                                )}
+                                <div className={`chat-message ${mine ? "mine" : "theirs"}`}>
+                                    {message.sharedPost ? (
+                                        <button
+                                            type="button"
+                                            className="shared-post-preview"
+                                            onClick={() => setExpandedSharedPost(message.sharedPost)}
+                                        >
+                                            <span className="shared-post-media">
+                                                {message.sharedPost.type === "video" ? (
+                                                    <video src={message.sharedPost.mediaUrl} poster={message.sharedPost.thumbnailUrl || undefined} muted playsInline preload="metadata" />
+                                                ) : (
+                                                    <img src={message.sharedPost.thumbnailUrl || message.sharedPost.mediaUrl} alt={message.sharedPost.caption || "Shared post"} />
+                                                )}
+                                            </span>
+                                            <span className="shared-post-copy">
+                                                <strong>@{message.sharedPost.author?.username || "devspace"}</strong>
+                                                <span>{message.sharedPost.caption || "Shared a post with you"}</span>
+                                            </span>
+                                        </button>
+                                    ) : (
+                                        <div className="message-bubble-content">
+                                            <span>{message.text}</span>
+                                        </div>
+                                    )}
+                                    <div className="message-meta">
+                                        {messageTime && <span className="message-time">{messageTime}</span>}
+                                        {mine && <small className="message-status">{message.status}</small>}
+                                    </div>
                                 </div>
-                                <div className="message-meta">
-                                    {messageTime && <span className="message-time">{messageTime}</span>}
-                                    {mine && <small className="message-status">{message.status}</small>}
-                                </div>
-                            </div>
+                            </Fragment>
                         );
                     })}
                     <div ref={messagesEndRef} />
@@ -203,6 +312,26 @@ function MessagingHub({ open, onClose, onUnreadChange }) {
                     <button type="submit" disabled={!text.trim() || !activeUser || !socketConnected}>Send</button>
                 </form>
             </aside>
+
+            {expandedSharedPost && (
+                <div className="shared-post-lightbox" role="dialog" aria-modal="true" aria-label="Shared post preview">
+                    <button type="button" className="shared-post-lightbox-backdrop" onClick={() => setExpandedSharedPost(null)} aria-label="Close shared post" />
+                    <div className="shared-post-lightbox-content">
+                        <button type="button" className="shared-post-lightbox-close" onClick={() => setExpandedSharedPost(null)} aria-label="Close shared post">×</button>
+                        <div className="shared-post-expanded-media">
+                            {expandedSharedPost.type === "video" ? (
+                                <video src={expandedSharedPost.mediaUrl} poster={expandedSharedPost.thumbnailUrl || undefined} controls playsInline />
+                            ) : (
+                                <img src={expandedSharedPost.mediaUrl || expandedSharedPost.thumbnailUrl} alt={expandedSharedPost.caption || "Shared post"} />
+                            )}
+                        </div>
+                        <div className="shared-post-expanded-copy">
+                            <strong>@{expandedSharedPost.author?.username || "devspace"}</strong>
+                            <p>{expandedSharedPost.caption}</p>
+                        </div>
+                    </div>
+                </div>
+            )}
         </section>
     );
 }

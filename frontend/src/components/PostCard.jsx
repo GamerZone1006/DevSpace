@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/immutability */
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -11,10 +12,21 @@ function PostCard({ post, onPostUpdate, onPostDelete, initialCommentsOpen = fals
     const [saved, setSaved] = useState(Boolean(post.savedByMe));
     const [savesCount, setSavesCount] = useState(post.savesCount || 0);
     const [sharesCount, setSharesCount] = useState(post.sharesCount || 0);
+    const [commentsCount, setCommentsCount] = useState(post.commentsCount || 0);
     const [actionLoading, setActionLoading] = useState("");
+    const [reportLoading, setReportLoading] = useState(false);
     const [showComments, setShowComments] = useState(initialCommentsOpen);
     const [carouselIndex, setCarouselIndex] = useState(0);
     const [now, setNow] = useState(0);
+    const [shareOpen, setShareOpen] = useState(false);
+    const [shareSearch, setShareSearch] = useState("");
+    const [shareUsers, setShareUsers] = useState([]);
+    const [shareLoading, setShareLoading] = useState(false);
+    const [sharingUserId, setSharingUserId] = useState("");
+    const [sharedWithUserId, setSharedWithUserId] = useState("");
+    const [reported, setReported] = useState(Boolean(post.reportedByMe));
+    const [viewsCount, setViewsCount] = useState(post.viewsCount || 0);
+    const [reportCount, setReportCount] = useState(post.reportCount || 0);
 
     const watchTimer = useRef(null);
     const lastTrackedTime = useRef(0);
@@ -27,6 +39,29 @@ function PostCard({ post, onPostUpdate, onPostDelete, initialCommentsOpen = fals
         const timer = window.setInterval(updateTime, 15000);
 
         return () => window.clearInterval(timer);
+    }, [post._id]);
+
+    useEffect(() => {
+        if (!postCardRef.current) return undefined;
+
+        let tracked = false;
+        const observer = new IntersectionObserver(([entry]) => {
+            if (!tracked && entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+                tracked = true;
+                api.post(`/posts/${post._id}/view`)
+                    .then((response) => {
+                        const nextViewsCount = response.data.viewsCount ?? viewsCount;
+                        setViewsCount(nextViewsCount);
+                        persistUpdate({ viewsCount: nextViewsCount });
+                    })
+                    .catch((error) => {
+                        console.error("View tracking error:", error);
+                    });
+            }
+        }, { threshold: 0.5 });
+
+        observer.observe(postCardRef.current);
+        return () => observer.disconnect();
     }, [post._id]);
 
     useEffect(() => {
@@ -75,7 +110,10 @@ function PostCard({ post, onPostUpdate, onPostDelete, initialCommentsOpen = fals
         setSaved(Boolean(post.savedByMe));
         setSavesCount(post.savesCount || 0);
         setSharesCount(post.sharesCount || 0);
-    }, [post._id, post.likedByMe, post.likesCount, post.savedByMe, post.savesCount, post.sharesCount]);
+        setCommentsCount(post.commentsCount || 0);
+        setViewsCount(post.viewsCount || 0);
+        setReportCount(post.reportCount || 0);
+    }, [post._id, post.likedByMe, post.likesCount, post.savedByMe, post.savesCount, post.sharesCount, post.commentsCount, post.viewsCount, post.reportCount]);
 
     useEffect(() => {
         setCarouselIndex(0);
@@ -139,7 +177,25 @@ function PostCard({ post, onPostUpdate, onPostDelete, initialCommentsOpen = fals
         }
     };
 
+    const postLink = `${window.location.origin}/post/${post._id}`;
+
     const handleShare = async () => {
+        setShareOpen(true);
+        setSharedWithUserId("");
+        if (shareUsers.length > 0) return;
+
+        try {
+            setShareLoading(true);
+            const response = await api.get("/messages/users");
+            setShareUsers(response.data.users || []);
+        } catch (error) {
+            console.error("Share users error:", error);
+        } finally {
+            setShareLoading(false);
+        }
+    };
+
+    const handleExternalShare = async () => {
         try {
             const response = await api.post(`/engagement/share/${post._id}`);
             const nextShares = response.data.sharesCount ?? sharesCount + 1;
@@ -150,17 +206,54 @@ function PostCard({ post, onPostUpdate, onPostDelete, initialCommentsOpen = fals
                 await navigator.share({
                     title: "DevSpace",
                     text: post.caption || "Check out this post on DevSpace",
-                    url: `${window.location.origin}/post/${post._id}`
+                    url: postLink
                 });
             } else {
-                await navigator.clipboard.writeText(
-                    `${window.location.origin}/post/${post._id}`
-                );
+                await navigator.clipboard.writeText(postLink);
             }
         } catch (error) {
             console.error("Share error:", error);
         }
     };
+
+    const handleReport = async () => {
+        if (reported || reportLoading) return;
+
+        try {
+            setReportLoading(true);
+            const response = await api.post(`/posts/${post._id}/report`);
+            setReported(true);
+            setViewsCount(response.data.viewsCount ?? viewsCount);
+            setReportCount(response.data.reportCount ?? reportCount + 1);
+            persistUpdate({
+                viewsCount: response.data.viewsCount ?? viewsCount,
+                reportCount: response.data.reportCount ?? reportCount + 1,
+                reportedByMe: true
+            });
+            if (response.data.removed) onPostDelete?.(post._id);
+        } catch (error) {
+            console.error("Report error:", error);
+        } finally {
+            setReportLoading(false);
+        }
+    };
+
+    const handleInAppShare = async (user) => {
+        if (sharingUserId) return;
+        try {
+            setSharingUserId(user._id);
+            await api.post(`/messages/${user._id}/share`, { postId: post._id });
+            setSharedWithUserId(user._id);
+        } catch (error) {
+            console.error("In-app share error:", error);
+        } finally {
+            setSharingUserId("");
+        }
+    };
+
+    const filteredShareUsers = shareUsers.filter((user) =>
+        `${user.name || ""} ${user.username || ""}`.toLowerCase().includes(shareSearch.toLowerCase())
+    );
 
     const trackWatch = async (video) => {
         if (!video.duration) return;
@@ -197,22 +290,22 @@ function PostCard({ post, onPostUpdate, onPostDelete, initialCommentsOpen = fals
     };
 
     const authorId = post.author?._id || post.author?.id || post.author?.username;
-    const currentUser = JSON.parse(localStorage.getItem("devspaceUser") || "null");
-    const isOwnPost = currentUser && (post.author?._id === currentUser._id || post.author?.id === currentUser.id);
+    // const currentUser = JSON.parse(localStorage.getItem("devspaceUser") || "null");
+    // const isOwnPost = currentUser && (post.author?._id === currentUser._id || post.author?.id === currentUser.id);
 
-    const handleDelete = async () => {
-        if (!window.confirm("Are you sure you want to delete this post?")) {
-            return;
-        }
+    // const handleDelete = async () => {
+    //     if (!window.confirm("Are you sure you want to delete this post?")) {
+    //         return;
+    //     }
 
-        try {
-            await api.delete(`/posts/${post._id}`);
-            onPostDelete?.(post._id);
-        } catch (error) {
-            console.error("Delete post error:", error);
-            alert("Failed to delete post. Please try again.");
-        }
-    };
+    //     try {
+    //         await api.delete(`/posts/${post._id}`);
+    //         onPostDelete?.(post._id);
+    //     } catch (error) {
+    //         console.error("Delete post error:", error);
+    //         alert("Failed to delete post. Please try again.");
+    //     }
+    // };
 
     const mediaItems = post.mediaUrls?.length ? post.mediaUrls : [post.mediaUrl].filter(Boolean);
     const moveCarousel = (direction) => {
@@ -223,6 +316,54 @@ function PostCard({ post, onPostUpdate, onPostDelete, initialCommentsOpen = fals
 
     return (
         <article ref={postCardRef} className={`post-card ${feedPost ? "feed-post-card" : ""} ${autoPlayOnView ? "reel-post-card" : ""}`}>
+            {shareOpen && (
+                <div className="share-modal-backdrop" role="presentation" onMouseDown={(event) => {
+                    if (event.target === event.currentTarget) setShareOpen(false);
+                }}>
+                    <section className="share-modal" role="dialog" aria-modal="true" aria-labelledby={`share-title-${post._id}`}>
+                        <header className="share-modal-header">
+                            <div>
+                                <span className="share-eyebrow">SEND TO</span>
+                                <h3 id={`share-title-${post._id}`}>Share this post</h3>
+                            </div>
+                            <button type="button" className="share-modal-close" onClick={() => setShareOpen(false)} aria-label="Close share dialog">×</button>
+                        </header>
+                        <input
+                            className="share-search"
+                            value={shareSearch}
+                            onChange={(event) => setShareSearch(event.target.value)}
+                            placeholder="Search people"
+                            aria-label="Search people to share with"
+                        />
+                        <div className="share-user-grid">
+                            {shareLoading ? <span className="share-empty">Loading people...</span> : filteredShareUsers.length === 0 ? (
+                                <span className="share-empty">No matching people</span>
+                            ) : filteredShareUsers.map((user) => (
+                                <button type="button" className="share-user" key={user._id} onClick={() => handleInAppShare(user)} disabled={Boolean(sharingUserId)}>
+                                    {user.profilePicture ? <img src={user.profilePicture} alt={user.username} /> : <span className="share-user-fallback">{user.name?.charAt(0).toUpperCase() || "?"}</span>}
+                                    <span>{sharedWithUserId === user._id ? "Sent" : user.username}</span>
+                                </button>
+                            ))}
+                        </div>
+                        <footer className="share-external-row">
+                            <button type="button" onClick={handleExternalShare}>
+                                <span className="share-external-icon">↗</span>
+                                Share outside
+                            </button>
+                            <button type="button" onClick={async () => {
+                                try {
+                                    await navigator.clipboard.writeText(postLink);
+                                } catch (error) {
+                                    console.error("Copy link error:", error);
+                                }
+                            }}>
+                                <span className="share-external-icon">⛓</span>
+                                Copy Link
+                            </button>
+                        </footer>
+                    </section>
+                </div>
+            )}
             <div className="post-author-bar">
                 <Link to={authorId ? `/profile/${authorId}` : "/profile"} className="author-link">
                     <div className="author-avatar">
@@ -314,7 +455,7 @@ function PostCard({ post, onPostUpdate, onPostDelete, initialCommentsOpen = fals
                                         <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
                                     </svg>
                                 </span>
-                                <span className="action-count">{post.commentsCount || 0}</span>
+                                <span className="action-count">{commentsCount}</span>
                             </button>
 
                             <button type="button" onClick={handleShare} aria-label="Share">
@@ -342,7 +483,23 @@ function PostCard({ post, onPostUpdate, onPostDelete, initialCommentsOpen = fals
                                 <span className="action-count">{savesCount}</span>
                             </button>
 
-                            {isOwnPost && (
+                            <button
+                                type="button"
+                                onClick={handleReport}
+                                disabled={reportLoading || reported}
+                                className={reported ? "reported" : ""}
+                                aria-label="Report post"
+                            >
+                                <span className="action-icon">
+                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M4 21V4a1 1 0 0 1 1-1h10l1 3h4v9H6" />
+                                        <path d="M6 15h14" />
+                                    </svg>
+                                </span>
+                                <span className="action-count">{reported ? "Sent" : "Report"}</span>
+                            </button>
+
+                            {/* {isOwnPost && (
                                 <button
                                     type="button"
                                     onClick={handleDelete}
@@ -356,7 +513,7 @@ function PostCard({ post, onPostUpdate, onPostDelete, initialCommentsOpen = fals
                                         </svg>
                                     </span>
                                 </button>
-                            )}
+                            )} */}
                         </div>
                     </div>
 
@@ -371,10 +528,15 @@ function PostCard({ post, onPostUpdate, onPostDelete, initialCommentsOpen = fals
                     )}
                 </div>
 
-                <CommentSection
-                    postId={post._id}
-                    open={showComments}
-                    onClose={() => setShowComments(false)}
+                <CommentSection 
+                    postId={post._id} 
+                    open={showComments} 
+                    onClose={() => setShowComments(false)} 
+                    onCommentAdded={() => {
+                        const nextCount = commentsCount + 1;
+                        setCommentsCount(nextCount);
+                        persistUpdate({ commentsCount: nextCount });
+                    }}
                 />
             </div>
         </article>

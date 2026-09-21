@@ -4,10 +4,17 @@ const protect = require("../middleware/authMiddleware");
 
 const {
     toggleSave,
-    sharePost
+    sharePost,
+    getSavedPosts
 } = require("../controllers/engagementController");
 
 const router = express.Router();
+
+router.get(
+    "/saved",
+    protect,
+    getSavedPosts
+);
 
 router.post(
     "/save/:postId",

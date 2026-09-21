@@ -100,6 +100,31 @@ const userSchema = new mongoose.Schema(
         badges: {
             type: [String],
             default: []
+        },
+
+        moderationWarnings: [{
+            post: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "Post",
+                required: true
+            },
+            message: {
+                type: String,
+                required: true
+            },
+            seenAt: {
+                type: Date,
+                default: null
+            },
+            createdAt: {
+                type: Date,
+                default: Date.now
+            }
+        }],
+
+        hasUnseenReportWarning: {
+            type: Boolean,
+            default: false
         }
     },
     {

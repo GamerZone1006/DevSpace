@@ -1,6 +1,11 @@
 import { NavLink } from "react-router-dom";
+import { useFollowerNotifications } from "../context/FollowerNotificationContext";
+import { useModerationNotifications } from "../context/ModerationNotificationContext";
 
 function Sidebar({ onMessagesClick, unreadMessages }) {
+    const { hasUnseenFollowers } = useFollowerNotifications();
+    const { hasUnseenWarnings } = useModerationNotifications();
+
     return (
         <aside className="sidebar">
             <div className="sidebar-menu">
@@ -37,10 +42,14 @@ function Sidebar({ onMessagesClick, unreadMessages }) {
 
                 {/* Profile */}
                 <NavLink to="/profile" className={({ isActive }) => isActive ? 'active' : ''}>
-                    <svg viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
-                        <circle cx="12" cy="7" r="4" />
-                    </svg>
+                    <span className="sidebar-profile-icon-wrap">
+                        <svg viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+                            <circle cx="12" cy="7" r="4" />
+                        </svg>
+                        {hasUnseenWarnings && <span className="moderation-notification-badge" aria-label="Moderation warnings" />}
+                        {hasUnseenFollowers && <span className="follower-notification-badge" aria-label="New followers" />}
+                    </span>
                     <span className="nav-text">Profile</span>
                 </NavLink>
 

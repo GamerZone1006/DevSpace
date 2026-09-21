@@ -10,8 +10,11 @@ const formatPost = (post, userId, savedSet = new Set()) => {
         savesCount: data.savesCount ?? 0,
         sharesCount: data.sharesCount ?? 0,
         commentsCount: data.commentsCount ?? 0,
+        viewsCount: data.viewsCount ?? data.viewers?.length ?? 0,
+        reportCount: data.reporters?.length ?? 0,
         likedByMe: likes.some((id) => id.toString() === userId?.toString()),
-        savedByMe: savedSet.has(data._id.toString())
+        savedByMe: savedSet.has(data._id.toString()),
+        reportedByMe: data.reporters?.some((id) => id.toString() === userId?.toString()) || false
     };
 };
 

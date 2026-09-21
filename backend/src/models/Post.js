@@ -82,6 +82,16 @@ const postSchema = new mongoose.Schema(
             default: 0
         },
 
+        viewers: [{
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User"
+        }],
+
+        reporters: [{
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User"
+        }],
+
         savesCount: {
             type: Number,
             default: 0
@@ -89,7 +99,7 @@ const postSchema = new mongoose.Schema(
 
         status: {
             type: String,
-            enum: ["processing", "ready", "published", "rejected"],
+            enum: ["processing", "ready", "published", "rejected", "removed"],
             default: "processing"
         }
     },

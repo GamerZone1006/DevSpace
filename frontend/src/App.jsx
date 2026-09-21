@@ -16,6 +16,8 @@ import Dashboard from "./pages/Dashboard";
 import Profile from "./pages/Profile";
 import Loader from "./components/Loader";
 import { UserProvider } from "./context/UserContext";
+import { FollowerNotificationProvider } from "./context/FollowerNotificationContext";
+import { ModerationNotificationProvider } from "./context/ModerationNotificationContext";
 
 function ProtectedPage({ children }) {
     return (
@@ -56,45 +58,49 @@ function App() {
 
     return (
         <UserProvider>
-            <BrowserRouter>
-                <Routes>
-                <Route path="/" element={<Navigate to="/feed" replace />} />
-                <Route path="/login" element={<Login />} />
-                <Route path="/register" element={<Register />} />
-                <Route
-                    path="/feed"
-                    element={
-                        <ProtectedPage>
-                            <Feed />
-                        </ProtectedPage>
-                    }
-                />
-                <Route
-                    path="/profile"
-                    element={
-                        <ProtectedPage>
-                            <Profile />
-                        </ProtectedPage>
-                    }
-                />
-                <Route
-                    path="/profile/:userId"
-                    element={
-                        <ProtectedPage>
-                            <Profile />
-                        </ProtectedPage>
-                    }
-                />
-                <Route
-                    path="/dashboard"
-                    element={
-                        <ProtectedPage>
-                            <Dashboard />
-                        </ProtectedPage>
-                    }
-                />
-                </Routes>
-            </BrowserRouter>
+                <FollowerNotificationProvider>
+                    <ModerationNotificationProvider>
+                        <BrowserRouter>
+                            <Routes>
+                    <Route path="/" element={<Navigate to="/feed" replace />} />
+                    <Route path="/login" element={<Login />} />
+                    <Route path="/register" element={<Register />} />
+                    <Route
+                        path="/feed"
+                        element={
+                            <ProtectedPage>
+                                <Feed />
+                            </ProtectedPage>
+                        }
+                    />
+                    <Route
+                        path="/profile"
+                        element={
+                            <ProtectedPage>
+                                <Profile />
+                            </ProtectedPage>
+                        }
+                    />
+                    <Route
+                        path="/profile/:userId"
+                        element={
+                            <ProtectedPage>
+                                <Profile />
+                            </ProtectedPage>
+                        }
+                    />
+                    <Route
+                        path="/dashboard"
+                        element={
+                            <ProtectedPage>
+                                <Dashboard />
+                            </ProtectedPage>
+                        }
+                    />
+                            </Routes>
+                        </BrowserRouter>
+                    </ModerationNotificationProvider>
+                </FollowerNotificationProvider>
         </UserProvider>
     );
 }

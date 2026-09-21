@@ -117,7 +117,7 @@ const calculateExploration = (post, user) => {
     return unknownTags.length > 0 ? 0.8 : 0.25;
 };
 
-const generateRecommendations = async (userId, limit = 50) => {
+const generateRecommendations = async (userId, limit = 50, options = {}) => {
     const user = await User.findById(userId);
 
     if (!user) {
@@ -173,6 +173,19 @@ const generateRecommendations = async (userId, limit = 50) => {
     scoredPosts.sort(
         (a, b) => b.recommendationScore - a.recommendationScore
     );
+
+    if (options.prioritizeNewest && scoredPosts.length > 1) {
+        const newestPost = scoredPosts.reduce((newest, current) =>
+            new Date(current.post.createdAt) > new Date(newest.post.createdAt)
+                ? current
+                : newest
+        );
+
+        return [
+            newestPost,
+            ...scoredPosts.filter((item) => item.post._id.toString() !== newestPost.post._id.toString())
+        ].slice(0, limit);
+    }
 
     return scoredPosts.slice(0, limit);
 };

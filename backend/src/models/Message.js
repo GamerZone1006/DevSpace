@@ -18,6 +18,10 @@ const messageSchema = new mongoose.Schema(
             trim: true,
             maxlength: 2000
         },
+        sharedPost: {
+            type: mongoose.Schema.Types.Mixed,
+            default: null
+        },
         status: {
             type: String,
             enum: ["sent", "delivered", "read"],

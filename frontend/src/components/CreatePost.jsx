@@ -1,5 +1,46 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import api from "../services/api";
+
+const VideoPreview = ({ src }) => {
+    const videoRef = useRef(null);
+
+    useEffect(() => {
+        const video = videoRef.current;
+        if (!video) return;
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                entries.forEach((entry) => {
+                    if (entry.isIntersecting) {
+                        video.play().catch((err) => {
+                            console.log('Autoplay prevented:', err);
+                        });
+                    } else {
+                        video.pause();
+                    }
+                });
+            },
+            { threshold: 0.6 }
+        );
+
+        observer.observe(video);
+
+        return () => {
+            observer.disconnect();
+            video.pause();
+        };
+    }, []);
+
+    return (
+        <video
+            ref={videoRef}
+            src={src}
+            controls
+            playsInline
+            preload="metadata"
+        />
+    );
+};
 
 const MAX_FILES = 10;
 
@@ -10,7 +51,21 @@ function CreatePost({ onPostCreated }) {
     const [technologyTags, setTechnologyTags] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
+    const [guidelinesOpen, setGuidelinesOpen] = useState(false);
+    const [guidelinesAcknowledged, setGuidelinesAcknowledged] = useState(false);
     const fileInputRef = useRef(null);
+
+    const openCreationGuidelines = () => {
+        if (!guidelinesAcknowledged) setGuidelinesOpen(true);
+    };
+
+    const continueToEditor = () => {
+        setGuidelinesAcknowledged(true);
+        setGuidelinesOpen(false);
+        window.requestAnimationFrame(() => {
+            fileInputRef.current?.click();
+        });
+    };
 
     const handleFileChange = (e) => {
         const selectedFiles = Array.from(e.target.files || []);
@@ -62,6 +117,7 @@ function CreatePost({ onPostCreated }) {
             setPreviewUrls([]);
             setCaption("");
             setTechnologyTags("");
+            setGuidelinesAcknowledged(false);
             if (fileInputRef.current) fileInputRef.current.value = "";
 
             if (onPostCreated) {
@@ -78,6 +134,36 @@ function CreatePost({ onPostCreated }) {
 
     return (
         <div className="insta-create-card">
+            {guidelinesOpen && (
+                <div
+                    className="post-guidelines-backdrop"
+                    role="presentation"
+                    onMouseDown={(event) => {
+                        if (event.target === event.currentTarget) setGuidelinesOpen(false);
+                    }}
+                >
+                    <section
+                        className="post-guidelines-modal"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="post-guidelines-title"
+                    >
+                        <span className="post-guidelines-eyebrow">COMMUNITY GUIDELINES</span>
+                        <h2 id="post-guidelines-title">Share thoughtfully</h2>
+                        <p>
+                            No inappropriate posts are allowed. If more than 80% of users who view the post report it, it will be automatically removed.
+                        </p>
+                        <div className="post-guidelines-actions">
+                            <button type="button" className="post-guidelines-cancel" onClick={() => setGuidelinesOpen(false)}>
+                                Cancel
+                            </button>
+                            <button type="button" className="post-guidelines-continue" onClick={continueToEditor}>
+                                Continue
+                            </button>
+                        </div>
+                    </section>
+                </div>
+            )}
             {/* Minimal Header */}
             <div className="insta-header">
                 <h3>Create new post</h3>
@@ -98,21 +184,21 @@ function CreatePost({ onPostCreated }) {
                     {/* Media Upload / Preview Section (Left) */}
                     <div 
                         className={`insta-media-dropzone ${previewUrls.length ? "has-media" : ""}`}
-                        onClick={() => !previewUrls.length && fileInputRef.current.click()}
+                        onClick={() => !previewUrls.length && openCreationGuidelines()}
                     >
                         {previewUrls.length ? (
                             <div className="insta-preview-container">
                                 <div className="insta-preview-grid">
                                     {previewUrls.map((previewUrl, index) => (
                                         files[index]?.type.startsWith("video/") ? (
-                                            <video key={previewUrl} src={previewUrl} controls />
+                                            <VideoPreview key={previewUrl} src={previewUrl} />
                                         ) : (
                                             <img key={previewUrl} src={previewUrl} alt={`Upload preview ${index + 1}`} />
                                         )
                                     ))}
                                 </div>
                                 <span className="insta-preview-count">
-                                    {files.length} {files.length === 1 ? "image" : "images"} selected
+                                    {files.length} {files.length === 1 ? (files[0]?.type.startsWith("video/") ? "video" : "image") : "items"} selected
                                 </span>
                                 <button 
                                     type="button" 
@@ -138,6 +224,7 @@ function CreatePost({ onPostCreated }) {
                         <input 
                             type="file" 
                             ref={fileInputRef}
+                            onClick={(event) => event.stopPropagation()}
                             onChange={handleFileChange}
                             multiple={true}
                             accept="image/*,video/*" 

@@ -14,6 +14,7 @@ const { redisClient } = require("../config/redis");
 const { visiblePostsFilter } = require("../utils/postVisibility");
 const { formatPost } = require("../utils/formatPost");
 const { checkAndAwardBadges } = require("../services/badgeService");
+const { emitPostDeleted } = require("../socket");
 
 const inferType = (type, file) => {
     if (["image", "video"].includes(type)) {
@@ -272,10 +273,132 @@ const toggleLike = async (req, res) => {
     }
 };
 
+const trackView = async (req, res) => {
+    try {
+        const post = await Post.findOneAndUpdate(
+            { _id: req.params.id, status: { $in: ["ready", "published"] }, viewers: { $ne: req.userId } },
+            { $addToSet: { viewers: req.userId }, $inc: { viewsCount: 1 } },
+            { new: true }
+        );
+
+        if (post) {
+            return res.status(200).json({ viewsCount: post.viewsCount });
+        }
+
+        const existingPost = await Post.findById(req.params.id).select("_id status viewsCount");
+        if (!existingPost) return res.status(404).json({ message: "Post not found" });
+        res.status(200).json({ viewsCount: existingPost.viewsCount });
+    } catch (error) {
+        console.error("Track view error:", error);
+        res.status(500).json({ message: "Failed to track view" });
+    }
+};
+
+const reportPost = async (req, res) => {
+    try {
+        const post = await Post.findById(req.params.id).select("author status viewers reporters viewsCount");
+        if (!post) return res.status(404).json({ message: "Post not found" });
+        if (post.author.toString() === req.userId) {
+            return res.status(400).json({ message: "You cannot report your own post" });
+        }
+        const viewers = post.viewers || [];
+        const reporters = post.reporters || [];
+        if (reporters.some((id) => id.toString() === req.userId)) {
+            return res.status(200).json({
+                reported: true,
+                removed: post.status === "removed",
+                viewsCount: viewers.length,
+                reportCount: reporters.length
+            });
+        }
+
+        const updatedPost = await Post.findOneAndUpdate(
+            {
+                _id: req.params.id,
+                status: { $in: ["ready", "published"] },
+                reporters: { $ne: req.userId }
+            },
+            {
+                $addToSet: {
+                    viewers: req.userId,
+                    reporters: req.userId
+                }
+            },
+            { new: true }
+        ).select("author type publicId publicIds viewers reporters viewsCount");
+
+        if (!updatedPost) {
+            const currentPost = await Post.findById(req.params.id).select("status viewers reporters viewsCount");
+            if (!currentPost) return res.status(404).json({ message: "Post not found" });
+            return res.status(200).json({
+                reported: true,
+                removed: currentPost.status === "removed",
+                viewsCount: currentPost.viewers?.length || currentPost.viewsCount || 0,
+                reportCount: currentPost.reporters?.length || 0
+            });
+        }
+
+        const reportCount = updatedPost.reporters.length;
+        const viewCount = updatedPost.viewers.length;
+        const shouldRemove = viewCount > 0 && reportCount / viewCount > 0.8;
+
+        if (!shouldRemove) {
+            await Post.updateOne(
+                { _id: updatedPost._id },
+                { $set: { viewsCount: viewCount } }
+            );
+            return res.status(200).json({
+                reported: true,
+                removed: false,
+                viewsCount: viewCount,
+                reportCount
+            });
+        }
+
+        const warningMessage = "Your post was marked as inappropriate by the community and has been automatically removed.";
+        const publicIds = updatedPost.publicIds?.length ? updatedPost.publicIds : [updatedPost.publicId];
+        const deletedPost = await Post.findOneAndDelete({ _id: updatedPost._id });
+        if (!deletedPost) {
+            return res.status(200).json({
+                reported: true,
+                removed: true,
+                viewsCount: viewCount,
+                reportCount,
+                message: warningMessage
+            });
+        }
+
+        emitPostDeleted(deletedPost._id);
+
+        await User.findByIdAndUpdate(updatedPost.author, {
+            $push: { moderationWarnings: { post: updatedPost._id, message: "Your post was marked as inappropriate by the community and has been automatically removed." } },
+            $set: { hasUnseenReportWarning: true },
+            $inc: { "stats.postsCount": -1 }
+        });
+
+        await Promise.all(publicIds.map((publicId) => cloudinary.uploader.destroy(publicId, {
+            resource_type: updatedPost.type === "video" ? "video" : "image"
+        })));
+
+        res.status(200).json({
+            reported: true,
+            removed: true,
+            viewsCount: viewCount,
+            reportCount,
+            message: warningMessage
+        });
+    } catch (error) {
+        console.error("Report post error:", error);
+        res.status(500).json({ message: "Failed to report post" });
+    }
+};
+
 module.exports = {
     createPost,
     getPost,
     getAllPosts,
     deletePost,
-    toggleLike
+    toggleLike,
+    trackView,
+    reportPost
 };

@@ -1,10 +1,12 @@
 import { Link, useNavigate } from "react-router-dom";
 import SearchBar from "./SearchBar";
 import { useUser } from "../context/useUser";
+import { useModerationNotifications } from "../context/ModerationNotificationContext";
 
 function Navbar() {
     const navigate = useNavigate();
     const { user, setUser } = useUser();
+    const { hasUnseenWarnings } = useModerationNotifications();
 
     const handleLogout = () => {
         localStorage.removeItem("devspaceToken");
@@ -34,6 +36,7 @@ function Navbar() {
                                 {user.name?.charAt(0).toUpperCase()}
                             </span>
                         )}
+                        {hasUnseenWarnings && <span className="moderation-notification-badge" aria-label="Moderation warning" />}
                     </Link>
                 )}
 
