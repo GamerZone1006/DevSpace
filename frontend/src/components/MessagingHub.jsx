@@ -4,7 +4,7 @@ import { io } from "socket.io-client";
 import api from "../services/api";
 import { useUser } from "../context/useUser";
 
-const socketUrl = import.meta.env.VITE_SOCKET_URL || "http://localhost:5000";
+const socketUrl = import.meta.env.VITE_SOCKET_URL || "https://devspace-backend-z7ye.onrender.com";
 
 function UserAvatar({ user, className = "" }) {
     return user?.profilePicture ? (
